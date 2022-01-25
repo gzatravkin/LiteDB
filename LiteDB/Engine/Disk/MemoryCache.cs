@@ -82,8 +82,7 @@ namespace LiteDB.Engine
                     }
 
                     newPage.ShareCounter = 0; //Wasn't able to add it? discard and try again
-                    this.CleanPage(newPage);
-                    _free.Enqueue(newPage);
+                    this.ReturnToFreePages(newPage);
                     continue;
                 }
                 else
@@ -315,11 +314,12 @@ namespace LiteDB.Engine
             }
         }
 
-        private void CleanPage(PageBuffer page)
+        private void ReturnToFreePages(PageBuffer page)
         {
             // clean controls
             page.Position = long.MaxValue;
             page.Origin = FileOrigin.None;
+            _free.Enqueue(page);
         }
 
         /// <summary>
@@ -366,9 +366,7 @@ namespace LiteDB.Engine
                     {
                         ENSURE(page.ShareCounter == 0, "page should be not in use by anyone");
 
-                        this.CleanPage(page);
-
-                        _free.Enqueue(page);
+                        this.ReturnToFreePages(page);
                     }
                 }
 
