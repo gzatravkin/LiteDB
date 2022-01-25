@@ -74,14 +74,15 @@ namespace LiteDB.Engine
                     newPage.ShareCounter = 1;
                     Interlocked.Exchange(ref newPage.Timestamp, DateTime.UtcNow.Ticks);
 
+                    // load page content with disk stream
+                    factory(position, newPage);
                     if (_readable.TryAdd(key, newPage))
                     {
-                        // load page content with disk stream
-                        factory(position, newPage);
                         return newPage;
                     }
 
                     newPage.ShareCounter = 0; //Wasn't able to add it? discard and try again
+                    this.CleanPage(newPage);
                     _free.Enqueue(newPage);
                     continue;
                 }
@@ -314,6 +315,13 @@ namespace LiteDB.Engine
             }
         }
 
+        private void CleanPage(PageBuffer page)
+        {
+            // clean controls
+            page.Position = long.MaxValue;
+            page.Origin = FileOrigin.None;
+        }
+
         /// <summary>
         /// Check if it's possible move readable pages to free list - if not possible, extend memory
         /// </summary>
@@ -358,9 +366,7 @@ namespace LiteDB.Engine
                     {
                         ENSURE(page.ShareCounter == 0, "page should be not in use by anyone");
 
-                        // clean controls
-                        page.Position = long.MaxValue;
-                        page.Origin = FileOrigin.None;
+                        this.CleanPage(page);
 
                         _free.Enqueue(page);
                     }
