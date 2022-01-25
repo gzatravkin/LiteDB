@@ -63,29 +63,50 @@ namespace LiteDB.Engine
         {
             // get dict key based on position/origin
             var key = this.GetReadableKey(position, origin);
-
-            // try get from _readble dict or create new
-            var page = _readable.GetOrAdd(key, (k) =>
+            do
             {
-                // get new page from _free pages (or extend)
-                var newPage = this.GetFreePage();
+            	//If key is not present, just create new page
+                if (!_readable.TryGetValue(key, out var page))
+                {
+                    var newPage = GetFreePage();
+                    newPage.Position = position;
+                    newPage.Origin = origin;
+                    newPage.ShareCounter = 1;
+                    Interlocked.Exchange(ref newPage.Timestamp, DateTime.UtcNow.Ticks);
 
-                newPage.Position = position;
-                newPage.Origin = origin;
+                    if (_readable.TryAdd(key, newPage))
+                    {
+                        // load page content with disk stream
+                        factory(position, newPage);
+                        return newPage;
+                    }
 
-                // load page content with disk stream
-                factory(position, newPage);
-
-                return newPage;
-            });
-
-            // update LRU
-            Interlocked.Exchange(ref page.Timestamp, DateTime.UtcNow.Ticks);
-
-            // increment share counter
-            Interlocked.Increment(ref page.ShareCounter);
-
-            return page;
+                    newPage.ShareCounter = 0; //Wasn't able to add it? discard and try again
+                    _free.Enqueue(newPage);
+                    continue;
+                }
+                else
+                {
+                    var shareCount = page.ShareCounter;
+                    if (shareCount == 0)
+                    {
+                        lock (this._free) //Locking free to ensure that Extend method won't delete our page meanwhile in another thread
+                        {
+                            if (_readable.TryGetValue(key, out var existingPage) && existingPage == page)
+                            {
+                                Interlocked.Increment(ref page.ShareCounter);
+                                Interlocked.Exchange(ref page.Timestamp, DateTime.UtcNow.Ticks);
+                                return page;
+                            }
+                            else
+                                continue;
+                        }
+                    }
+                    if (Interlocked.CompareExchange(ref page.ShareCounter, shareCount + 1, shareCount) != shareCount) continue;
+                    Interlocked.Exchange(ref page.Timestamp, DateTime.UtcNow.Ticks);
+                    return page;
+                }
+            } while (true);
         }
 
         /// <summary>
