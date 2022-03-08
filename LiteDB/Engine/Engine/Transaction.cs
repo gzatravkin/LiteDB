@@ -88,9 +88,11 @@ namespace LiteDB.Engine
             {
                 LOG(ex.Message, "ERROR");
 
-                transaction.Rollback();
-
-                _monitor.ReleaseTransaction(transaction);
+                if (transaction.State != TransactionState.Disposed) //This will happen if fails in this.CommitAndReleaseTransaction. We won't rollback in this case since transaction already is done 
+                {
+                    transaction.Rollback();
+                    _monitor.ReleaseTransaction(transaction);
+                }
 
                 throw;
             }
